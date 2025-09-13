@@ -10,3 +10,4 @@ chroma_db/
 sessions.json
 *.sqlite3
 *_embedding_metadata.json
+node_modules/

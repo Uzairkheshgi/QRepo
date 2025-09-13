@@ -17,14 +17,10 @@ import numpy as np
 import openai
 import tiktoken
 from chromadb.config import Settings
-from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
-# Load environment variables
-load_dotenv()
-
 import constants
-from models import FileInfo, Source
+from models.schemas import FileInfo, Source
 from services.semantic_chunker import SemanticChunker
 from utils import (
     normalize_repo_url,
@@ -73,11 +69,11 @@ class RAGService:
             # Normalize repository URL for consistent embedding reuse
             normalized_repo_url = normalize_repo_url(repo_url) if repo_url else None
             
-            # Check if we can reuse existing embeddings (disabled for now)
-            # if normalized_repo_url and self._can_reuse_embeddings(normalized_repo_url, files):
-            #     logger.info(f"Reusing existing embeddings for repository: {normalized_repo_url}")
-            #     self._reuse_existing_embeddings(collection_name, normalized_repo_url, session_id)
-            #     return
+            # Check if we can reuse existing embeddings
+            if normalized_repo_url and self._can_reuse_embeddings(normalized_repo_url, files):
+                logger.info(f"Reusing existing embeddings for repository: {normalized_repo_url}")
+                self._reuse_existing_embeddings(collection_name, normalized_repo_url, session_id)
+                return
             
             # Create new index
             self._delete_collection_if_exists(collection_name)

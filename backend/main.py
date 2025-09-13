@@ -1,202 +1,196 @@
 """
-RAG CLI Tool for Repository Indexing and Q&A
+GitHub Repository Indexing and Q&A Tool
 
-A simple command-line interface for indexing GitHub repositories
-and asking questions about codebases using RAG technology.
+Main FastAPI application with RAG pipeline for indexing GitHub repositories
+and providing Q&A capabilities about codebases.
 """
 
-import asyncio
 import logging
-import sys
-from typing import Optional
+import uuid
+from typing import Dict
 
+import uvicorn
 from dotenv import load_dotenv
+from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
+import constants
+from models.schemas import IndexRequest, QueryRequest, QueryResponse, StatusResponse
 from services.rag_service import RAGService
 from services.repository_service import RepositoryService
+from utils import (
+    load_sessions,
+    save_sessions,
+    index_repository_background,
+)
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, "INFO"),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
+app = FastAPI(
+    title="GitHub Repository Indexing & Q&A Tool",
+    description="A RAG-powered tool for indexing GitHub repositories and answering questions about codebases",
+    version="1.0.0",
+)
 
-class RAGCLI:
-    """Command-line interface for RAG repository indexing and Q&A."""
+# CORS middleware for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=constants.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    def __init__(self):
-        """Initialize the CLI with required services."""
-        self.repository_service = RepositoryService()
-        self.rag_service = RAGService()
-        self.current_session_id: Optional[str] = None
-        self.is_indexed = False
+# Global services
+repository_service = RepositoryService()
+rag_service = RAGService()
 
-    async def index_repository(self, repo_url: str) -> bool:
-        """
-        Index a repository for Q&A.
+# Session storage file
+SESSION_FILE = constants.SESSIONS_FILE
 
-        Args:
-            repo_url: URL or path of the repository to index
 
-        Returns:
-            True if indexing was successful, False otherwise
-        """
-        try:
-            # Generate session ID based on repo URL
-            session_id = f"session-{hash(repo_url) % 10000}"
-            self.current_session_id = session_id
 
-            logger.info(f"Indexing repository: {repo_url}")
-            logger.info("=" * 60)
 
-            # Step 1: Clone repository
-            logger.info("Cloning repository...")
-            repo_path = await self.repository_service.clone_repository(
-                repo_url, session_id
-            )
-            logger.info(f"Repository cloned to: {repo_path}")
+# Load existing sessions
+session_status: Dict[str, Dict] = load_sessions(SESSION_FILE)
 
-            # Step 2: Process files
-            logger.info("Processing files...")
-            files = await self.repository_service.process_repository_files(repo_path)
-            logger.info(f"Processed {len(files)} files")
 
-            # Step 3: Create vector index
-            logger.info("Creating vector embeddings...")
-            await self.rag_service.create_index(session_id, files, repo_url)
-            logger.info("Vector index created successfully")
+class IndexResponse(BaseModel):
+    message: str
+    session_id: str
 
-            self.is_indexed = True
-            logger.info("Repository indexed successfully!")
-            logger.info("You can now ask questions about the codebase.")
-            return True
 
-        except Exception as e:
-            logger.error(f"Error indexing repository: {str(e)}")
-            logger.error(f"Failed to index repository: {str(e)}")
-            return False
+@app.post("/index", response_model=IndexResponse)
+async def index_repository(
+    request: IndexRequest, background_tasks: BackgroundTasks
+) -> IndexResponse:
+    """Start indexing a GitHub repository.
 
-    async def ask_question(self, question: str) -> bool:
-        """
-        Ask a question about the indexed repository.
+    Args:
+        request: IndexRequest containing the repository URL to index.
+        background_tasks: FastAPI background tasks for async processing.
 
-        Args:
-            question: The question to ask
+    Returns:
+        IndexResponse with session_id for tracking indexing progress.
 
-        Returns:
-            True if question was answered successfully, False otherwise
-        """
-        if not self.is_indexed or not self.current_session_id:
-            logger.error("No repository indexed. Please index a repository first.")
-            return False
+    Raises:
+        HTTPException: If indexing fails to start.
+    """
+    try:
+        session_id = str(uuid.uuid4())
 
-        try:
-            logger.info(f"Question: {question}")
-            logger.info("Thinking...")
+        # Initialize session status
+        session_status[session_id] = {
+            "status": "indexing",
+            "message": "Starting repository cloning...",
+            "progress": 0,
+        }
+        save_sessions(session_status, SESSION_FILE)
 
-            response = await self.rag_service.query(self.current_session_id, question)
-
-            if response:
-                logger.info("Answer:")
-                logger.info(f"{response['answer']}")
-                logger.info(
-                    f"Confidence: {response.get('confidence', 'unknown').upper()}"
-                )
-                logger.info(f"Sources: {len(response.get('sources', []))} files")
-
-                # Show source files
-                if response.get("sources"):
-                    logger.info("Source files:")
-                    for i, source in enumerate(
-                        response["sources"][:3], 1
-                    ):  # Show first 3 sources
-                        logger.info(f"  {i}. {source['file']}")
-                    if len(response["sources"]) > 3:
-                        logger.info(
-                            f"  ... and {len(response['sources']) - 3} more files"
-                        )
-
-                return True
-            else:
-                logger.error("Failed to get answer")
-                return False
-
-        except Exception as e:
-            logger.error(f"Error processing question: {str(e)}")
-            logger.error(f"Error processing question: {str(e)}")
-            return False
-
-    async def interactive_mode(self):
-        """Start interactive Q&A mode."""
-        if not self.is_indexed:
-            logger.error("No repository indexed. Please index a repository first.")
-            return
-
-        logger.info("=" * 60)
-        logger.info("Interactive Q&A Mode")
-        logger.info("=" * 60)
-        logger.info(
-            "Ask questions about the codebase. Type 'quit', 'exit', or 'q' to stop."
+        # Start background indexing task
+        background_tasks.add_task(
+            index_repository_background, 
+            session_id, 
+            str(request.repo_url),
+            session_status,
+            SESSION_FILE,
+            repository_service,
+            rag_service
         )
-        logger.info("Type 'help' for example questions.")
 
-        while True:
-            try:
-                question = input("Your question: ").strip()
+        return IndexResponse(
+            message="Repository indexing started.", session_id=session_id
+        )
 
-                if question.lower() in ["quit", "exit", "q"]:
-                    logger.info("Goodbye!")
-                    break
-                elif not question:
-                    logger.info("Please enter a question.")
-                    continue
-
-                await self.ask_question(question)
-
-            except KeyboardInterrupt:
-                logger.info("Goodbye!")
-                break
-            except Exception as e:
-                logger.error(f"Error: {str(e)}")
+    except ValueError as e:
+        logger.error("Invalid request data: %s", e)
+        raise HTTPException(status_code=400, detail=f"Invalid request: {e}") from e
+    except Exception as e:
+        logger.error("Unexpected error starting indexing: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error during indexing initialization",
+        ) from e
 
 
-async def main():
-    """Main CLI function."""
-    logger.info("RAG Repository Indexer and Q&A Tool")
-    logger.info("=" * 60)
+@app.get("/status/{session_id}", response_model=StatusResponse)
+async def get_indexing_status(session_id: str) -> StatusResponse:
+    """Get the current status of repository indexing.
 
-    cli = RAGCLI()
+    Args:
+        session_id: Unique identifier for the indexing session.
 
-    # Get repository URL from command line argument or user input
-    if len(sys.argv) > 1:
-        repo_url = sys.argv[1]
-    else:
-        repo_url = input("Enter repository URL or path: ").strip()
-        if not repo_url:
-            logger.error("No repository URL provided. Exiting.")
-            return
+    Returns:
+        StatusResponse containing current indexing status and progress.
 
-    # Index the repository
-    success = await cli.index_repository(repo_url)
-    if not success:
-        logger.error("Failed to index repository. Exiting.")
-        return
+    Raises:
+        HTTPException: If session_id is not found.
+    """
+    if session_id not in session_status:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-    # Start interactive mode
-    await cli.interactive_mode()
+    return StatusResponse(**session_status[session_id])
+
+
+@app.post("/query", response_model=QueryResponse)
+async def query_repository(request: QueryRequest) -> QueryResponse:
+    """Query the indexed repository using RAG pipeline.
+
+    Args:
+        request: QueryRequest containing session_id and question.
+
+    Returns:
+        QueryResponse with answer, sources, and confidence score.
+
+    Raises:
+        HTTPException: If session not found, repository not ready, or query fails.
+    """
+    try:
+        if request.session_id not in session_status:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session_data = session_status[request.session_id]
+
+        if session_data["status"] != "ready":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Repository not ready for queries. Status: {session_data['status']}",
+            )
+
+        # Perform RAG query
+        result = await rag_service.query(
+            session_id=request.session_id, question=request.question
+        )
+
+        return QueryResponse(**result)
+
+    except ValueError as e:
+        logger.error("Invalid query request: %s", e)
+        raise HTTPException(status_code=400, detail=f"Invalid query: {e}") from e
+    except Exception as e:
+        logger.error("Unexpected error processing query: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Internal server error during query processing"
+        ) from e
+
+
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Goodbye!")
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        sys.exit(1)
+    uvicorn.run(
+        "main:app",
+        host=constants.HOST,
+        port=constants.PORT,
+        reload=True,
+        log_level="info",
+    )

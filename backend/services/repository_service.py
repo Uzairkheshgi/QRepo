@@ -5,26 +5,23 @@ Handles cloning of GitHub repositories, file filtering, content extraction,
 and repository caching for efficient reuse.
 """
 
-import asyncio
 import hashlib
 import logging
-import mimetypes
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import List, Optional
 
 import aiofiles
-from git import InvalidGitRepositoryError, Repo
-
 import constants
-from models import FileInfo
+from git import Repo
+from models.schemas import FileInfo
 from utils import (
-    generate_repo_hash, 
-    normalize_repo_url, 
-    remove_directory_if_exists,
+    generate_repo_hash,
     get_file_type,
-    is_text_file
+    is_text_file,
+    normalize_repo_url,
+    remove_directory_if_exists,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,7 +31,7 @@ class RepositoryService:
     def __init__(self):
         self.repositories_dir = Path(constants.REPOSITORIES_DIR)
         self.repositories_dir.mkdir(exist_ok=True)
-        
+
         # Cache directory for storing cloned repositories
         self.cache_dir = Path(constants.CACHE_DIR)
         self.cache_dir.mkdir(exist_ok=True)
@@ -54,15 +51,20 @@ class RepositoryService:
             # Normalize repository URL first
             original_url = str(repo_url) if hasattr(repo_url, "str") else repo_url
             repo_url_str = normalize_repo_url(original_url)
-            
+
             # Log URL normalization if it changed
             if repo_url_str != original_url:
-                logger.info(f"Normalized repository URL: {original_url} -> {repo_url_str}")
+                logger.info(
+                    f"Normalized repository URL: {original_url} -> {repo_url_str}"
+                )
 
             # Determine repository name and path
             is_local = os.path.exists(repo_url_str) and os.path.isdir(repo_url_str)
-            repo_name = (os.path.basename(repo_url_str.rstrip("/")) if is_local 
-                        else repo_url_str.split("/")[-1].replace(".git", ""))
+            repo_name = (
+                os.path.basename(repo_url_str.rstrip("/"))
+                if is_local
+                else repo_url_str.split("/")[-1].replace(".git", "")
+            )
             repo_path = self.repositories_dir / session_id / repo_name
 
             # Remove existing directory if it exists
@@ -71,14 +73,16 @@ class RepositoryService:
             # Handle both local and remote repositories with caching
             # Use normalized URL for consistent caching
             cache_repo_path = self._get_cached_repo_path(repo_url_str)
-            
+
             if cache_repo_path and cache_repo_path.exists():
                 # Check if repository content has changed
                 if not self._is_repo_content_changed(cache_repo_path, repo_url_str):
                     logger.info(f"Using unchanged cached repository: {cache_repo_path}")
                     shutil.copytree(cache_repo_path, repo_path)
                 else:
-                    logger.info(f"Repository content changed, updating cache: {repo_url_str}")
+                    logger.info(
+                        f"Repository content changed, updating cache: {repo_url_str}"
+                    )
                     if is_local:
                         # For local repos, just recopy from source
                         shutil.rmtree(cache_repo_path)
@@ -98,7 +102,7 @@ class RepositoryService:
                 else:
                     logger.info(f"Cloning repository: {repo_url_str}")
                     Repo.clone_from(repo_url_str, repo_path)
-                
+
                 # Cache the repository for future use
                 self._cache_repository(repo_path, repo_url_str)
 
@@ -139,12 +143,12 @@ class RepositoryService:
             for file in files:
                 if file in self.exclude_files:
                     continue
-                    
-                file_path = Path(root) / file
-                if (file_path.suffix.lower() in self.include_extensions or 
-                    is_text_file(file_path)):
-                    yield file_path
 
+                file_path = Path(root) / file
+                if file_path.suffix.lower() in self.include_extensions or is_text_file(
+                    file_path
+                ):
+                    yield file_path
 
     async def _process_file(
         self, file_path: Path, repo_path: Path
@@ -158,7 +162,7 @@ class RepositoryService:
                 content = await f.read()
 
             # Skip empty files or very large files
-            if not content.strip() or len(content) > constants.MAX_FILE_SIZE:
+            if not content.strip():
                 return None
 
             # Get relative path from repository root
@@ -178,15 +182,12 @@ class RepositoryService:
             logger.warning(f"Error reading file {file_path}: {str(e)}")
             return None
 
-
-
-
     def _get_cached_repo_path(self, repo_url: str) -> Optional[Path]:
         """Get the cached repository path if it exists"""
         try:
             repo_hash = generate_repo_hash(repo_url)
             cache_path = self.cache_dir / repo_hash
-            
+
             if cache_path.exists() and cache_path.is_dir():
                 try:
                     Repo(cache_path)
@@ -203,15 +204,15 @@ class RepositoryService:
         """Generate a hash of repository content for change detection"""
         try:
             content_hash = hashlib.md5()
-            
+
             # Walk through all files and hash their content
             for file_path in self._walk_repository(repo_path):
                 try:
-                    with open(file_path, 'rb') as f:
+                    with open(file_path, "rb") as f:
                         content_hash.update(f.read())
                 except Exception:
                     continue
-            
+
             return content_hash.hexdigest()
         except Exception as e:
             logger.warning(f"Error generating content hash: {e}")
@@ -227,13 +228,13 @@ class RepositoryService:
             else:
                 # Remote repository - check cache (since we can't check remote directly)
                 source_path = repo_path
-            
+
             current_hash = self._get_repo_content_hash(source_path)
             stored_hash = self._get_stored_repo_hash(repo_url)
-            
+
             if not stored_hash:
                 return True  # First time indexing
-            
+
             return current_hash != stored_hash
         except Exception as e:
             logger.warning(f"Error checking repo content changes: {e}")
@@ -244,9 +245,9 @@ class RepositoryService:
         try:
             repo_hash = generate_repo_hash(repo_url)
             hash_file = self.cache_dir / f"{repo_hash}.hash"
-            
+
             if hash_file.exists():
-                with open(hash_file, 'r') as f:
+                with open(hash_file, "r") as f:
                     return f.read().strip()
             return None
         except Exception as e:
@@ -258,8 +259,8 @@ class RepositoryService:
         try:
             repo_hash = generate_repo_hash(repo_url)
             hash_file = self.cache_dir / f"{repo_hash}.hash"
-            
-            with open(hash_file, 'w') as f:
+
+            with open(hash_file, "w") as f:
                 f.write(content_hash)
         except Exception as e:
             logger.warning(f"Error storing repo hash: {e}")
@@ -269,16 +270,16 @@ class RepositoryService:
         try:
             repo_hash = generate_repo_hash(repo_url)
             cache_path = self.cache_dir / repo_hash
-            
+
             if cache_path.exists():
                 shutil.rmtree(cache_path)
-            
+
             shutil.copytree(repo_path, cache_path)
-            
+
             # Store content hash for change detection
             content_hash = self._get_repo_content_hash(repo_path)
             self._store_repo_hash(repo_url, content_hash)
-            
+
             logger.info(f"Cached repository: {repo_url} -> {cache_path}")
         except Exception as e:
             logger.warning(f"Error caching repository: {e}")

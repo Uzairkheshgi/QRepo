@@ -157,25 +157,22 @@ COLLECTION_NAME = "code_embeddings"
 BATCH_SIZE = 100
 MAX_QUERY_RESULTS = 5
 
-# File size limits (in bytes)
-MAX_FILE_SIZE = 1024 * 1024
-MIN_FILE_SIZE = 0
 
 # Confidence scoring thresholds (cosine similarity - lower is better)
-HIGH_CONFIDENCE_DISTANCE = 0.4
-MEDIUM_CONFIDENCE_DISTANCE = 0.7
-HIGH_CONFIDENCE_SOURCES = 2
-MEDIUM_CONFIDENCE_SOURCES = 1
+HIGH_CONFIDENCE_DISTANCE = 0.4  # Very similar embeddings
+MEDIUM_CONFIDENCE_DISTANCE = 0.7  # Moderately similar embeddings
+HIGH_CONFIDENCE_SOURCES = 2  # Multiple source files
+MEDIUM_CONFIDENCE_SOURCES = 1  # Single source file
 
 # OpenAI Configuration
 OPENAI_MODEL = "gpt-4"
-OPENAI_MAX_TOKENS = 1000
+OPENAI_MAX_TOKENS = 1000  # Maximum tokens in response
 OPENAI_TEMPERATURE = 0.1
 
 # Directory paths
-REPOSITORIES_DIR = "repositories"
-CACHE_DIR = "repository_cache"
-SESSIONS_FILE = "sessions.json"
+REPOSITORIES_DIR = "repositories"  # Temporary repository storage
+CACHE_DIR = "repository_cache"  # Cached repositories for reuse
+SESSIONS_FILE = "sessions.json"  # Session persistence file
 
 # Prompts
 SYSTEM_PROMPT = "You are an expert code analyst who provides accurate, detailed answers based on code context."
@@ -224,3 +221,16 @@ End your response with: "Confidence: [HIGH/MEDIUM/LOW]"
 Answer:
 """
 
+# CORS Configuration
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+# Server Configuration
+HOST = "0.0.0.0"  # Listen on all interfaces
+PORT = 8000  # Default port for the API server
+
+# Logging Configuration
+LOG_LEVEL = "INFO"  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
