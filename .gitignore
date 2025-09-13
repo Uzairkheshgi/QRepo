@@ -1,0 +1,12 @@
+__pycache__/
+venv/
+env/
+.DS_Store
+repositories/
+repository_cache/
+*.log
+.env
+chroma_db/
+sessions.json
+*.sqlite3
+*_embedding_metadata.json
