@@ -8,6 +8,9 @@ and providing Q&A capabilities about codebases.
 import logging
 import uuid
 from typing import Dict
+from urllib.parse import urlparse
+import asyncio
+import aiohttp
 
 import uvicorn
 from dotenv import load_dotenv
@@ -59,6 +62,79 @@ rag_service = RAGService()
 SESSION_FILE = constants.SESSIONS_FILE
 
 
+def validate_github_url(url: str) -> bool:
+    """Validate if the URL is a valid GitHub repository URL.
+    
+    Args:
+        url: The URL to validate
+        
+    Returns:
+        bool: True if valid GitHub URL, False otherwise
+    """
+    try:
+        parsed = urlparse(url)
+        
+        # Check if it's HTTPS
+        if parsed.scheme != 'https':
+            return False
+            
+        # Check if it's from GitHub
+        if parsed.netloc not in ['github.com', 'www.github.com']:
+            return False
+            
+        # Check if it has the correct path format (username/repository)
+        path_parts = parsed.path.strip('/').split('/')
+        if len(path_parts) < 2:
+            return False
+            
+        # Check if it's not a special GitHub page (like issues, pull requests, etc.)
+        invalid_paths = ['issues', 'pulls', 'actions', 'projects', 'wiki', 'settings', 'security', 'insights']
+        if any(part in invalid_paths for part in path_parts[2:]):
+            return False
+            
+        return True
+        
+    except Exception:
+        return False
+
+
+async def check_repository_accessibility(url: str) -> tuple[bool, str]:
+    """Check if a GitHub repository is accessible.
+    
+    Args:
+        url: The GitHub repository URL to check
+        
+    Returns:
+        tuple: (is_accessible, error_message)
+    """
+    try:
+        # Convert to GitHub API URL
+        parsed = urlparse(url)
+        path_parts = parsed.path.strip('/').split('/')
+        if len(path_parts) < 2:
+            return False, "Invalid repository path"
+            
+        owner = path_parts[0]
+        repo = path_parts[1]
+        api_url = f"https://api.github.com/repos/{owner}/{repo}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, timeout=10) as response:
+                if response.status == 200:
+                    return True, ""
+                elif response.status == 404:
+                    return False, "Repository not found. It may be private or doesn't exist."
+                elif response.status == 403:
+                    return False, "Repository is private or access is forbidden."
+                else:
+                    return False, f"Repository is not accessible (HTTP {response.status})"
+                    
+    except asyncio.TimeoutError:
+        return False, "Timeout while checking repository accessibility"
+    except Exception as e:
+        return False, f"Error checking repository: {str(e)}"
+
+
 
 
 # Load existing sessions
@@ -87,6 +163,21 @@ async def index_repository(
         HTTPException: If indexing fails to start.
     """
     try:
+        # Validate the GitHub URL format
+        if not validate_github_url(request.repo_url):
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid URL. Please provide a valid GitHub repository URL (e.g., https://github.com/username/repository)"
+            )
+        
+        # Check if the repository is accessible
+        is_accessible, error_message = await check_repository_accessibility(request.repo_url)
+        if not is_accessible:
+            raise HTTPException(
+                status_code=400,
+                detail=error_message
+            )
+        
         session_id = str(uuid.uuid4())
 
         # Initialize session status
@@ -112,6 +203,8 @@ async def index_repository(
             message="Repository indexing started.", session_id=session_id
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.error("Invalid request data: %s", e)
         raise HTTPException(status_code=400, detail=f"Invalid request: {e}") from e

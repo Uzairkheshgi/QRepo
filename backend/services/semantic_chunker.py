@@ -4,11 +4,10 @@ Semantic chunking service using tree-sitter for language-aware parsing
 
 import os
 import logging
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-import tree_sitter
+from typing import List, Dict, Any
 from tree_sitter import Language, Parser
 
+import constants
 from utils import is_function_start, is_class_start
 
 logger = logging.getLogger(__name__)
@@ -17,69 +16,7 @@ logger = logging.getLogger(__name__)
 class SemanticChunker:
     def __init__(self):
         self.parsers = {}
-        self.language_configs = {
-            "python": {
-                "language": "python",
-                "grammar_path": "tree-sitter-python",
-                "chunk_types": [
-                    "function_definition",
-                    "class_definition",
-                    "import_statement",
-                    "comment",
-                ],
-            },
-            "javascript": {
-                "language": "javascript",
-                "grammar_path": "tree-sitter-javascript",
-                "chunk_types": [
-                    "function_declaration",
-                    "class_declaration",
-                    "import_statement",
-                    "comment",
-                ],
-            },
-            "typescript": {
-                "language": "typescript",
-                "grammar_path": "tree-sitter-typescript",
-                "chunk_types": [
-                    "function_declaration",
-                    "class_declaration",
-                    "import_statement",
-                    "interface_declaration",
-                    "comment",
-                ],
-            },
-            "java": {
-                "language": "java",
-                "grammar_path": "tree-sitter-java",
-                "chunk_types": [
-                    "method_declaration",
-                    "class_declaration",
-                    "import_declaration",
-                    "comment",
-                ],
-            },
-            "cpp": {
-                "language": "cpp",
-                "grammar_path": "tree-sitter-cpp",
-                "chunk_types": [
-                    "function_definition",
-                    "class_specifier",
-                    "include_directive",
-                    "comment",
-                ],
-            },
-            "c": {
-                "language": "c",
-                "grammar_path": "tree-sitter-cpp",
-                "chunk_types": [
-                    "function_definition",
-                    "struct_specifier",
-                    "include_directive",
-                    "comment",
-                ],
-            },
-        }
+        self.language_configs = constants.TREE_SITTER_LANGUAGE_CONFIGS
 
         # Initialize parsers for supported languages
         self._initialize_parsers()
@@ -89,45 +26,35 @@ class SemanticChunker:
         try:
             for lang_name, config in self.language_configs.items():
                 try:
-                    # Try to load the language grammar
-                    library_path = self._get_language_library_path(
-                        config["grammar_path"]
-                    )
-                    if library_path and os.path.exists(library_path):
-                        language = Language(library_path, config["language"])
+                    # Load the language grammar directly from the module
+                    import importlib
+                    grammar_module = importlib.import_module(config["grammar_path"])
+                    
+                    # Get the language function name (default to 'language')
+                    language_func_name = config.get("language_function", "language")
+                    
+                    if hasattr(grammar_module, language_func_name):
+                        language_capsule = getattr(grammar_module, language_func_name)()
+                        language = Language(language_capsule)
+                        parser = Parser()
+                        parser.language = language
+                        self.parsers[lang_name] = parser
+                        logger.info("Successfully initialized parser for %s", lang_name)
                     else:
-                        # Fallback: try to use the grammar package directly
-                        try:
-                            import importlib
-
-                            grammar_module = importlib.import_module(
-                                config["grammar_path"]
-                            )
-                            language = Language(grammar_module.language())
-                        except Exception:
-                            logger.warning(f"Could not load grammar for {lang_name}")
-                            continue
-                    parser = Parser()
-                    parser.set_language(language)
-                    self.parsers[lang_name] = parser
-                    logger.info(f"Initialized parser for {lang_name}")
+                        logger.warning("Grammar module %s does not have %s() function", config["grammar_path"], language_func_name)
+                        self.parsers[lang_name] = None
+                        
+                except ImportError:
+                    # Tree-sitter grammar not installed - use fallback chunking
+                    logger.warning("Tree-sitter grammar for %s not installed, using fallback chunking", lang_name)
+                    self.parsers[lang_name] = None
                 except Exception as e:
-                    logger.warning(f"Failed to initialize parser for {lang_name}: {e}")
+                    logger.warning("Failed to initialize parser for %s: %s", lang_name, e)
                     # Fallback to basic chunking
                     self.parsers[lang_name] = None
         except Exception as e:
-            logger.error(f"Failed to initialize tree-sitter parsers: {e}")
+            logger.error("Failed to initialize tree-sitter parsers: %s", e)
 
-    def _get_language_library_path(self, grammar_name: str) -> str:
-        """Get the path to the language library"""
-        try:
-            import importlib
-
-            module = importlib.import_module(grammar_name)
-            return module.language()
-        except ImportError:
-            # Fallback to basic chunking if tree-sitter languages aren't available
-            return None
 
     def create_semantic_chunks(
         self, content: str, file_type: str, file_path: str = ""
@@ -211,21 +138,7 @@ class SemanticChunker:
 
     def _get_semantic_type(self, node_type: str) -> str:
         """Map node types to semantic types"""
-        type_mapping = {
-            "function_definition": "function",
-            "function_declaration": "function",
-            "method_declaration": "method",
-            "class_definition": "class",
-            "class_declaration": "class",
-            "class_specifier": "class",
-            "interface_declaration": "interface",
-            "import_statement": "import",
-            "import_declaration": "import",
-            "include_directive": "include",
-            "comment": "comment",
-            "struct_specifier": "struct",
-        }
-        return type_mapping.get(node_type, "other")
+        return constants.SEMANTIC_TYPE_MAPPING.get(node_type, "other")
 
     def _create_fallback_chunks(
         self, content: str, file_type: str, file_path: str

@@ -111,7 +111,19 @@ class RepositoryService:
 
         except Exception as e:
             logger.error(f"Error cloning repository: {str(e)}")
-            raise Exception(f"Failed to clone repository: {str(e)}")
+            
+            # Provide more specific error messages based on the error type
+            error_str = str(e)
+            if "Repository not found" in error_str or "not found" in error_str:
+                raise Exception("Repository not found. Please check if the repository exists and is public.")
+            elif "Permission denied" in error_str or "access denied" in error_str:
+                raise Exception("Access denied. The repository may be private or you don't have permission to access it.")
+            elif "timeout" in error_str.lower():
+                raise Exception("Connection timeout. Please check your internet connection and try again.")
+            elif "authentication" in error_str.lower():
+                raise Exception("Authentication failed. The repository may require authentication.")
+            else:
+                raise Exception(f"Failed to clone repository: {error_str}")
 
     async def process_repository_files(self, repo_path: Path) -> List[FileInfo]:
         """Process repository files and return structured file information"""

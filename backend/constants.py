@@ -234,3 +234,85 @@ PORT = 8000  # Default port for the API server
 # Logging Configuration
 LOG_LEVEL = "INFO"  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Tree-sitter Configuration
+TREE_SITTER_LANGUAGE_CONFIGS = {
+    "python": {
+        "language": "python",
+        "grammar_path": "tree_sitter_python",
+        "chunk_types": [
+            "function_definition",
+            "class_definition",
+            "import_statement",
+            "comment",
+        ],
+    },
+    "javascript": {
+        "language": "javascript",
+        "grammar_path": "tree_sitter_javascript",
+        "chunk_types": [
+            "function_declaration",
+            "class_declaration",
+            "import_statement",
+            "comment",
+        ],
+    },
+    "typescript": {
+        "language": "typescript",
+        "grammar_path": "tree_sitter_typescript",
+        "language_function": "language_typescript",
+        "chunk_types": [
+            "function_declaration",
+            "class_declaration",
+            "import_statement",
+            "interface_declaration",
+            "comment",
+        ],
+    },
+    "java": {
+        "language": "java",
+        "grammar_path": "tree_sitter_java",
+        "chunk_types": [
+            "method_declaration",
+            "class_declaration",
+            "import_declaration",
+            "comment",
+        ],
+    },
+    "cpp": {
+        "language": "cpp",
+        "grammar_path": "tree_sitter_cpp",
+        "chunk_types": [
+            "function_definition",
+            "class_specifier",
+            "include_directive",
+            "comment",
+        ],
+    },
+    "c": {
+        "language": "c",
+        "grammar_path": "tree_sitter_cpp",
+        "chunk_types": [
+            "function_definition",
+            "struct_specifier",
+            "include_directive",
+            "comment",
+        ],
+    },
+}
+
+# Semantic Type Mapping
+SEMANTIC_TYPE_MAPPING = {
+    "function_definition": "function",
+    "function_declaration": "function",
+    "method_declaration": "method",
+    "class_definition": "class",
+    "class_declaration": "class",
+    "class_specifier": "class",
+    "interface_declaration": "interface",
+    "import_statement": "import",
+    "import_declaration": "import",
+    "include_directive": "include",
+    "comment": "comment",
+    "struct_specifier": "struct",
+}
